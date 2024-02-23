@@ -1,0 +1,30 @@
+#!/usr/bin/env python3
+# coding: utf-8
+
+from __future__ import annotations
+
+
+def to_maru(n: int) -> str:
+    if n == 0:
+        return chr(9450)
+    elif 1 <= n and n <= 20:
+        return chr(9311 + n)
+    elif 21 <= n and n <= 35:
+        return chr(12860 + n)
+    elif 36 <= n and n <= 50:
+        return chr(12941 + n)
+    else:
+        return str(n)
+
+
+def f(s: str) -> str:
+    if s == "":
+        return s
+    try:
+        return to_maru(int(s))
+    except ValueError:
+        return s
+
+
+inp = open(0).read().splitlines()
+print("\n".join(map(f, inp)))

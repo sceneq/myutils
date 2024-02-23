@@ -1,0 +1,200 @@
+#!/usr/bin/env python3
+# coding: utf-8
+
+from __future__ import annotations
+from typing import Callable, Iterable, Set, Generic, TypeVar, Union
+import sys
+from pathlib import Path
+import operator
+from collections import OrderedDict
+from operator import or_, xor, and_, sub
+from dataclasses import dataclass
+
+
+T = TypeVar("T")
+
+
+class OrderedSet(OrderedDict, Generic[T]):
+    """
+    >>> f = lambda op, l, r: list(op(l, r).keys())
+    >>> s0 = OrderedSet([    2,    ])
+    >>> s1 = OrderedSet([ 1, 2,    ])
+    >>> s2 = OrderedSet([    2, 3, ])
+    >>> s3 = OrderedSet([ 1,    3, ])
+    >>> s4 = OrderedSet([ 1, 2, 3, ])
+    >>> assert f(or_,  s1, s2)  == [1,2,3]
+    >>> assert f(or_,  s2, s3)  == [2,3,1]
+    >>> assert f(or_,  s3, s2)  == [1,3,2]
+    >>> assert f(xor,  s1, s2)  == [1, 3]
+    >>> assert f(xor,  s2, s3)  == [2, 1]
+    >>> assert f(xor,  s2, s1)  == [3, 1]
+    >>> assert f(and_, s1, s4)  == [1, 2]
+    >>> assert f(and_, s4, s1)  == [1, 2]
+    >>> assert f(and_, s4, s2)  == [2, 3]
+    >>> assert f(sub,  s4, s0)  == [1, 3]
+    >>> assert f(sub,  s0, s0)  == []
+    >>> assert f(sub,  s3, s0)  == [1, 3]
+    """
+
+    def __init__(self, values: Iterable[T] | None):
+        super().__init__()
+        if values is None:
+            return
+        for value in values:
+            self.add(value)
+
+    def add(self, value: T):
+        self[value] = None
+
+    def discard(self, value: T):
+        if value in self:
+            del self[value]
+
+    def __iter__(self):
+        return iter(self.keys())
+
+    def __contains__(self, value: T) -> bool:
+        return value in self.keys()
+
+    def __len__(self):
+        return len(self.values())
+
+    def __sub__(self, other):
+        result = OrderedSet(self)
+        for value in other:
+            result.discard(value)
+        return result
+
+    def __and__(self, other):
+        result = OrderedSet([])
+        for value in self:
+            if value in other:
+                result.add(value)
+        return result
+
+    def __or__(self, other):
+        result = OrderedSet(self)
+        for value in other:
+            result.add(value)
+        return result
+
+    def __xor__(self, other):
+        result = OrderedSet(self)
+        for value in other:
+            if value in result:
+                result.discard(value)
+            else:
+                result.add(value)
+        return result
+
+
+ALLOW_OP = {"and", "sub", "or", "xor", "&", "-", "|", "^"}
+
+GenericSet = Union[Set[T], OrderedSet[T]]
+SetFunc = Callable[[GenericSet, GenericSet], GenericSet]
+# どうしてこんなことに
+
+
+def op2func(op: str) -> SetFunc:
+    if op in {"and", "&"}:
+        return operator.and_
+    elif op in {"sub", "-"}:
+        return operator.sub
+    elif op in {"or", "|"}:
+        return operator.or_
+    elif op in {"xor", "^"}:
+        return operator.xor
+    raise Exception(op)
+
+
+def to_lines(s: str) -> list[str]:
+    return s.strip().splitlines()
+
+
+def process_set(
+    sets: list[Set[str]] | list[OrderedSet[str]],
+    funcs: list[SetFunc],
+):
+    """
+    >>> s1 = {"1", "2",           }
+    >>> s2 = {     "2", "3",      }
+    >>> s3 = {"1", "2", "3", "4", }
+    >>> assert calc_set([s1, s2], [and_]) == {"2"}
+    >>> assert calc_set([s1, s2], [or_])  == {"1", "2", "3"}
+    >>> assert calc_set([s1, s2], [xor]) == {"1", "3"}
+    >>> assert calc_set([s3, s2, s1], [sub, sub]) == {"4"}
+    """
+
+    assert len(sets) == len(funcs) + 1, f"sets len={len(sets)}, funcs len={len(funcs)}"
+
+    ret = sets[0]
+    for func, rhs in zip(funcs, sets[1:]):
+        ret = func(ret, rhs)
+    return ret
+
+
+# > fileop f1 or f2 or f3 sub f4 sub f5  # (f1|f2|f3) - (f4|f5)
+def main(argv: list[str]):
+
+    @dataclass
+    class Options:
+        unordered: bool
+        stdin: bool
+        paths: list[Path]
+        funcs: list[SetFunc]
+
+    #
+    # parse args
+    #
+    opt = Options(
+        unordered=False,
+        stdin=False,
+        paths=[],
+        funcs=[],
+    )
+    i = 0
+    for arg in argv[1:]:
+        if arg.startswith("-") and len(arg) >= 2:
+            if arg in ("-u", "--unordered"):
+                opt.unordered = True
+            else:
+                raise Exception("unknwon arg", arg)
+        elif i % 2 == 1:
+            # OP
+            f = op2func(arg.lower())
+            opt.funcs.append(f)
+            i += 1
+        else:
+            if arg in ALLOW_OP:
+                if opt.stdin:
+                    raise Exception(arg)
+                stdin = True
+                # OP
+                f = op2func(arg.lower())
+                opt.funcs.append(f)
+                continue
+
+            # Path
+            p = Path(arg)
+            assert p.exists(), p
+
+            opt.paths.append(p)
+            i += 1
+
+    if opt.unordered:
+        newSet = set
+    else:
+        newSet = OrderedSet
+
+    sets = []
+    if opt.stdin:
+        sets.append(newSet(to_lines(open(0).read())))
+    sets.extend([newSet(to_lines(p.read_text())) for p in opt.paths])
+    ret = process_set(sets, opt.funcs)
+
+    if len(ret) >= 1:
+        print("\n".join(ret))
+
+
+if __name__ == "__main__":
+    main(sys.argv)

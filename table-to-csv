@@ -1,0 +1,48 @@
+#!/usr/bin/env python3
+# coding: utf-8
+
+from __future__ import annotations
+import re
+import csv
+import sys
+from typing import TextIO
+
+DelimitedRanges = list[tuple[int, int]]
+
+
+def into_rec(raw: str, delim: DelimitedRanges) -> list[str]:
+    ret = []
+    curr = 0
+    for fr, to in delim:
+        ret.append(raw[curr:to].strip())
+        curr = to
+    return ret
+
+
+def into_csv(raw: str, writer: TextIO) -> None:
+    inp = raw.splitlines()
+    head = inp[0]
+    data = inp[1:]
+
+    delim: DelimitedRanges = []
+    for m in re.finditer(r" +", head):
+        delim.append(m.span())
+
+    wtr = csv.writer(writer)
+    wtr.writerow(into_rec(head, delim))
+
+    for raw in data:
+        wtr.writerow(into_rec(raw, delim))
+
+    writer.flush()
+
+
+# # examble: `wmic.exe logicaldisk`
+# inp = r"""
+# Availability  BytesPerSector  Capabilities  CapabilityDescriptions                 Caption                 CompressionMethod  ConfigManagerErrorCode  ConfigManagerUserConfig  CreationClassName  DefaultBlockSize  Description  DeviceID            ErrorCleared  ErrorDescription  ErrorMethodology  FirmwareRevision  Index  InstallDate  InterfaceType  LastErrorCode  Manufacturer            MaxBlockSize  MaxMediaSize  MediaLoaded  MediaType              MinBlockSize  Model                   Name                NeedsCleaning  NumberOfMediaSupported  Partitions  PNPDeviceID                                                  PowerManagementCapabilities  PowerManagementSupported  SCSIBus  SCSILogicalUnit  SCSIPort  SCSITargetId  SectorsPerTrack  SerialNumber                              Signature   Size           Status  StatusInfo  SystemCreationClassName  SystemName  TotalCylinders  TotalHeads  TotalSectors  TotalTracks  TracksPerCylinder
+#               512             {3, 4}        {"Random Access", "Supports Writing"}  Crucial_CT525MX300SSD1                     0                       FALSE                    Win32_DiskDrive                      Disk drive   \\.\PHYSICALDRIVE0                                                    M0CR031           0                   IDE                           (Standard disk drives)                              TRUE         Fixed hard disk media                Crucial_CT525MX300SSD1  \\.\PHYSICALDRIVE0                                         2           SCSI\DISK&VEN_&PROD_CRUCIAL_CT525MX3\4&26892DD9&0&020000                                                            2        0                0         0             63               164614AF1F5C                                          525110100480   OK                  Win32_ComputerSystem     INTERNET    63841           255         1025605665    16279455     255
+#               512             {3, 4}        {"Random Access", "Supports Writing"}  Seagate ZP2000GV30012                      0                       FALSE                    Win32_DiskDrive                      Disk drive   \\.\PHYSICALDRIVE1                                                    SUFSM002          1                   SCSI                          (Standard disk drives)                              TRUE         Fixed hard disk media                Seagate ZP2000GV30012   \\.\PHYSICALDRIVE1                                         3           SCSI\DISK&VEN_NVME&PROD_SEAGATE_ZP2000GV\5&EC559BE&0&000000                                                         0        0                1         0             63               0000_0000_0000_0001_6479_A772_FF00_0C1E.  1470214500  2000396321280  OK                  Win32_ComputerSystem     INTERNET    243201          255         3907024065    62016255     255
+# """.strip()
+# into_csv(inp, sys.stdout)
+
+into_csv(open(0).read().strip(), sys.stdout)

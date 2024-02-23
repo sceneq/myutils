@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -CEeu
+
+tomls=$(fd --type file '^Cargo.toml$' | fzf -m -0 || true)
+for toml in ${tomls[@]}; do
+	cargo clean --manifest-path "$toml"
+done
+
+ds=$(fd -d 2 -t d node_modules | fzf -m -0 || true)
+for d in ${ds[@]}; do
+	echo rm -r "$d"
+done
+
+gomods=$(fd -d 2 -t f go.mod | fzf -m -0 || true)
+for gomod in ${gomods[@]}; do
+	(
+		cd "$(dirname $gomod)"
+		go clean
+	)
+done

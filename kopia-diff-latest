@@ -1,0 +1,2 @@
+#!/usr/bin/env fish
+kopia snapshot list --json | jq -r '.[-2:] | map(.id) | join(" ")' | string split " " | xargs kopia diff

@@ -1,0 +1,39 @@
+#! python.exe
+# coding: utf-8
+
+from __future__ import annotations
+from pathlib import Path
+import xlwings as xw
+import csv
+import typing
+
+inp_files = Path("tmp").glob("*.tsv")
+output_excel = "output.xlsx"
+encoding = "utf-8"
+delimiter = "\t"
+
+
+def sheet_name_map(p: Path) -> str:
+    s = p.stem
+    return s
+
+
+def fill_sublists(input_list: list[list]):
+    max_length = max(len(sublist) for sublist in input_list)
+    return [sublist + [None] * (max_length - len(sublist)) for sublist in input_list]
+
+
+with xw.App(visible=True) as app:
+    book = app.books.add()
+
+    for csv_file in inp_files:
+        sheet = book.sheets.add(sheet_name_map(csv_file), after=book.sheets[-1])
+
+        with open(csv_file, mode="r", newline="", encoding=encoding) as file:
+            rdr = csv.reader(file, delimiter=delimiter)
+            data = [*rdr]
+
+        sheet.range("A:CA").number_format = "@"
+        sheet.used_range.value = fill_sublists(data)
+
+    book.save(output_excel)

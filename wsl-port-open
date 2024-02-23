@@ -1,0 +1,15 @@
+#! /usr/bin/env bash
+set -o errexit -o errtrace -o noclobber -o pipefail -o nounset -x
+
+cd "$(dirname "$0")"
+
+PORT=$1
+HOST_IPV4="192.168.0.178"
+WSL2_IPV4=$(ip address show eth0 | awk '/inet / {print $2}' | awk -F / '{print $1}')
+
+echo "portfoward $HOST_IPV4:$PORT <-> $WSL2_IPV4:$PORT"
+gsudo netsh.exe interface portproxy add v4tov4 \
+  listenaddress=$HOST_IPV4 \
+  listenport=$PORT \
+  connectaddress=$WSL2_IPV4 \
+  connectport=$PORT \

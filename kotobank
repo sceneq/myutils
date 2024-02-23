@@ -1,0 +1,65 @@
+#!/usr/bin/env python3
+# coding: utf-8
+
+from __future__ import annotations
+
+from typing import List, Sequence, Tuple, Dict, Mapping, Set, Optional, Union
+from os.path import exists, join, splitext, basename
+import sys
+from time import sleep
+
+import httpx
+from bs4 import BeautifulSoup as BS
+
+
+def word_req(word: str) -> httpx.Request:
+    return httpx.Request(
+        "get",
+        f"https://kotobank.jp/word/{word}",
+        headers={
+            "user-agent": "python",
+            "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9",
+            "accept-language": "ja,en-US;q=0.9,en;q=0.8",
+            "accept-encoding": "gzip, deflate, br",
+        },
+    )
+
+
+def extract_abstract(doc: BS) -> str | None:
+    n = None
+    # TODO .description > .media は無視したい( kotobank/紺青 )
+    if n := doc.select_one(".description"):
+        pass
+    else:
+        print("?", doc)
+        return None
+    assert n is not None
+    return n.text.strip()
+
+
+def extract_yomi(doc: BS) -> str | None:
+    y = doc.select_one("#mainTitle > h1 > span")
+    if y is None:
+        return None
+
+    # y: <span>（読み）こぜん</span>
+    return y.text[4:]
+
+
+K = sys.argv[1:]
+if len(K) == 0:
+    K = open(0).read().splitlines()
+
+client = httpx.Client()
+for i, kanji in enumerate(K):
+    req = word_req(kanji)
+    r = client.send(req, follow_redirects=True)
+    if r.status_code == 404:
+        abstract = "404"
+        yomi = "?"
+    else:
+        doc = BS(r.text, "html.parser")
+        abstract = extract_abstract(doc)
+        yomi = extract_yomi(doc)
+    print(f"{kanji}({yomi}): {abstract}")
+    sleep(1)

@@ -1,0 +1,11 @@
+#! /usr/bin/env bash
+set -o errexit -o errtrace -o noclobber -o pipefail -o nounset
+
+FROM="UTF-8"
+TO="cp932"
+
+for file in $@; do
+  OUT="${file}.${TO}"
+  iconv -f "$FROM" -t "$TO" "$file" -o "$OUT"
+  echo "mv '${OUT}' '${file}'"
+done

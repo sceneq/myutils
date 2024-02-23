@@ -1,0 +1,15 @@
+#! /usr/bin/env python3
+# coding: utf-8
+
+from __future__ import annotations
+
+
+def everything_filelist(filelist: list[str]) -> str:
+    s = "|".join(filelist)
+    return f'filelist:"{s}"'
+
+
+if __name__ == "__main__":
+    lines = open(0).read().splitlines()
+    res = everything_filelist(lines)
+    print(res)

@@ -1,0 +1,71 @@
+#!/usr/bin/env python3
+# coding: utf-8
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+from subprocess import Popen, PIPE
+
+
+def to_utf8(b: bytes, start: int, end: int) -> str:
+    s, d = start, end
+    while s > 0:  # Adjust start
+        if (b[s] & 0xC0) != 0x80:
+            break
+        s -= 1
+
+    while d < len(b):  # Adjust end
+        if (b[d] & 0xC0) != 0x80:
+            break
+        d += 1
+
+    return str(b[s:d], encoding="UTF-8")
+
+
+def main(opts: list[str]):
+    context_bytes_before = 3 * 16
+    context_bytes_after = 3 * 6
+
+    rg_opt = []
+    i = 0
+    while i < len(opts):
+        if opts[i] == "--bytes-before":
+            context_bytes_before = int(opts[i + 1])
+            i += 2
+        elif opts[i] == "--bytes-after":
+            context_bytes_after = int(opts[i + 1])
+            i += 2
+        elif opts[i] == "--bytes":
+            context_bytes_before = context_bytes_after = int(opts[i + 1])
+            i += 2
+        else:
+            rg_opt.append(opts[i])
+            i += 1
+
+    p = Popen(["rg", "--json", *rg_opt], stdout=PIPE)
+    assert p.stdout is not None
+
+    for j in p.stdout.read().splitlines():
+        o = json.loads(j)
+        if o["type"] == "match":
+            file_path = o["data"]["path"]["text"]
+            line_number = o["data"]["line_number"]
+
+            lines = o["data"]["lines"]["text"]
+            lines_bytes = bytes(lines, encoding="UTF-8")
+
+            for m in o["data"]["submatches"]:
+                text = m["match"]["text"]
+                start = m["start"]  # bytes
+                end = m["end"]  # bytes
+
+                s = max(0, start - context_bytes_before)
+                d = min(len(lines_bytes), end + context_bytes_after)
+                body = to_utf8(lines_bytes, s, d)
+                print(f"{file_path}:{line_number}", body)
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

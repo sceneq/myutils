@@ -1,0 +1,10 @@
+#!/usr/bin/env python3
+# coding: utf-8
+
+from __future__ import annotations
+import urllib.parse
+import sys
+
+d = open(0).read()
+e = urllib.parse.quote(d)
+print(e, end="")

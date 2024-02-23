@@ -1,0 +1,14 @@
+#! /usr/bin/env python3
+# coding: utf-8
+
+from __future__ import annotations
+from pathlib import Path
+import sys
+
+# sudo apt install poppler-utils
+# pip install pdf2image
+from pdf2image.pdf2image import convert_from_path
+
+images = convert_from_path(sys.argv[1])
+for i, img in enumerate(images):
+    img.rotate(-90, expand=1).save(f"pdf_{i}.jpg")

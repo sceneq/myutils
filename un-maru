@@ -1,0 +1,32 @@
+#!/usr/bin/env python3
+# coding: utf-8
+
+from __future__ import annotations
+
+
+def un_maru(n: int) -> int:
+    if n == 9450:
+        return 0
+    elif 9311 + 1 <= n <= 9311 + 20:
+        return n - 9311
+    elif 12860 + 21 <= n <= 12860 + 35:
+        return n - 12860
+    elif 12941 + 36 <= n <= 12941 + 50:
+        return n - 12941
+    else:
+        return n
+
+
+def f(s: str) -> str:
+    if len(s) != 1:
+        return s
+
+    n = un_maru(ord(s))
+    if 0 <= n and n <= 50:
+        return str(n)
+    else:
+        return s
+
+
+inp = open(0).read().splitlines()
+print("\n".join(map(f, inp)))
