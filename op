@@ -19,7 +19,7 @@ def op2func(op: str):
 def get_nums() -> list[float]:
     lines = open(0).read().splitlines()
 
-    tmp = [e.split(" ") for e in lines]
+    tmp = [e.strip().split(" ") for e in lines if e]
     tmp = reduce(lambda a, b: a + b, tmp)
     tmp = map(float, tmp)
 

@@ -1,0 +1,53 @@
+#! /usr/bin/env python3
+# coding: utf-8
+
+from datetime import datetime
+
+TWEPOCH = 1288834974657  # 2010/11/04
+
+
+def milli_timestamp_to_snowflake(d: int, epoch: int):
+    return (d - epoch) << 22
+
+
+def snowflake_to_milli_timestamp(s: int, epoch: int):
+    return (s >> 22) + epoch
+
+
+def dt2sf(d: datetime, epoch=TWEPOCH):
+    ts = round(d.timestamp() * 1000)
+    sf = milli_timestamp_to_snowflake(ts, epoch)
+    return sf
+
+
+def sf2dt(sf: int, epoch=TWEPOCH):
+    ts = snowflake_to_milli_timestamp(sf, epoch)
+    dt = datetime.fromtimestamp(ts / 1000.0)
+    return dt
+
+
+def main():
+    do_s = lambda d, epoch=TWEPOCH: print(dt2sf(d, epoch))
+    do_d = lambda s, epoch=TWEPOCH: print(sf2dt(s, epoch))
+
+    import sys
+
+    for inp in sys.argv[1:]:
+        if len(inp) >= 18:
+            do_d(int(inp))
+        else:
+            s = (
+                inp.replace("/", "")
+                .replace(" ", "")
+                .replace(".", "")
+                .replace(":", "")
+                .replace("-", "")
+            )
+            y = int(s[:4])
+            m = int(s[4:6])
+            d = int(s[6:8])
+            do_s(datetime(y, m, d))
+
+
+if __name__ == "__main__":
+    main()

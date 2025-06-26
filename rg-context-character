@@ -1,71 +1,167 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#   "wcwidth==0.2.13",
+# ]
+# ///
 # coding: utf-8
 
 from __future__ import annotations
 
 import json
 import sys
-from pathlib import Path
 from subprocess import Popen, PIPE
+from wcwidth import wcswidth
+import shutil
+from dataclasses import dataclass
 
 
 def to_utf8(b: bytes, start: int, end: int) -> str:
     s, d = start, end
-    while s > 0:  # Adjust start
+    while s > 0:
         if (b[s] & 0xC0) != 0x80:
             break
         s -= 1
 
-    while d < len(b):  # Adjust end
+    while d < len(b):
         if (b[d] & 0xC0) != 0x80:
             break
         d += 1
 
-    return str(b[s:d], encoding="UTF-8")
+    return b[s:d].decode("utf-8", errors="replace")
 
 
-def main(opts: list[str]):
-    context_bytes_before = 3 * 16
-    context_bytes_after = 3 * 6
+def colorize_match(text: str, rel_start: int, rel_end: int) -> str:
+    return (
+        text[:rel_start]
+        + "\033[31m"
+        + text[rel_start:rel_end]
+        + "\033[0m"
+        + text[rel_end:]
+    )
+
+
+@dataclass
+class Opts:
+    context_bytes_before: int
+    context_bytes_after: int
+    align_output: bool
+    use_color: bool
+    rg_opt: list[str]
+
+
+def parse_args(args: list[str]) -> Opts:
+    context_bytes_before: int | None = None
+    context_bytes_after: int | None = None
+    use_color: bool | None = None
+    align_output = True
 
     rg_opt = []
     i = 0
-    while i < len(opts):
-        if opts[i] == "--bytes-before":
-            context_bytes_before = int(opts[i + 1])
+    while i < len(args):
+        if args[i] == "--bytes-before":
+            context_bytes_before = int(args[i + 1])
             i += 2
-        elif opts[i] == "--bytes-after":
-            context_bytes_after = int(opts[i + 1])
+        elif args[i] == "--bytes-after":
+            context_bytes_after = int(args[i + 1])
             i += 2
-        elif opts[i] == "--bytes":
-            context_bytes_before = context_bytes_after = int(opts[i + 1])
+        elif args[i] == "--bytes":
+            context_bytes_before = context_bytes_after = int(args[i + 1])
             i += 2
+        elif args[i] == "--no-align":
+            align_output = False
+            i += 1
+        elif args[i] == "--color":
+            use_color = True
+            i += 1
+        elif args[i] == "--no-color":
+            use_color = False
+            i += 1
         else:
-            rg_opt.append(opts[i])
+            rg_opt.append(args[i])
             i += 1
 
-    p = Popen(["rg", "--json", *rg_opt], stdout=PIPE)
+    # ターミナルの幅からcontextを算出
+    if context_bytes_before is None or context_bytes_after is None:
+        term_width = shutil.get_terminal_size().columns
+        if context_bytes_before is None:
+            context_bytes_before = int(term_width * 0.3)
+        if context_bytes_after is None:
+            context_bytes_after = int(term_width * 0.7)
+
+    # 色付け
+    if use_color is None:
+        use_color = sys.stdout.isatty()
+        assert use_color is not None
+
+    return Opts(
+        context_bytes_before=context_bytes_before,
+        context_bytes_after=context_bytes_after,
+        align_output=align_output,
+        use_color=use_color,
+        rg_opt=rg_opt,
+    )
+
+
+def main(opts: Opts):
+
+    p = Popen(["rg", "--json", *opts.rg_opt], stdout=PIPE)
     assert p.stdout is not None
+
+    outputs = []
+    max_visual_offset = 0
 
     for j in p.stdout.read().splitlines():
         o = json.loads(j)
-        if o["type"] == "match":
-            file_path = o["data"]["path"]["text"]
-            line_number = o["data"]["line_number"]
+        if o["type"] != "match":
+            continue
 
-            lines = o["data"]["lines"]["text"]
-            lines_bytes = bytes(lines, encoding="UTF-8")
+        file_path = o["data"]["path"]["text"]
+        line_number = o["data"]["line_number"]
+        lines = o["data"]["lines"]["text"]
+        lines_bytes = lines.encode("utf-8")
 
-            for m in o["data"]["submatches"]:
-                text = m["match"]["text"]
-                start = m["start"]  # bytes
-                end = m["end"]  # bytes
+        for m in o["data"]["submatches"]:
+            start = m["start"]  # bytes
+            end = m["end"]  # bytes
 
-                s = max(0, start - context_bytes_before)
-                d = min(len(lines_bytes), end + context_bytes_after)
-                body = to_utf8(lines_bytes, s, d)
-                print(f"{file_path}:{line_number}", body)
+            s = max(0, start - opts.context_bytes_before)
+            d = min(len(lines_bytes), end + opts.context_bytes_after)
+            context_str = to_utf8(lines_bytes, s, d).rstrip("\r\n")
+
+            prefix_str = f"{file_path}:{line_number}"
+            prefix_width = wcswidth(prefix_str)
+
+            # 色付け (指定したcontextとline次第でずれる)
+            prefix_bytes = lines_bytes[s:start]
+            match_bytes = lines_bytes[start:end]
+
+            prefix_text = prefix_bytes.decode("utf-8", errors="replace")
+            match_text = match_bytes.decode("utf-8", errors="replace")
+            rel_start = len(prefix_text)
+            rel_end = rel_start + len(match_text)
+
+            if opts.use_color:
+                context_str = colorize_match(context_str, rel_start, rel_end)
+
+            # aligning
+            left_context_visual = wcswidth(context_str[:rel_start])
+            visual_offset = prefix_width + 1 + left_context_visual  # +1 for space
+            max_visual_offset = max(max_visual_offset, visual_offset)
+
+            #
+            outputs.append((prefix_str, context_str, prefix_width, left_context_visual))
+
+    for prefix_str, context_str, prefix_width, left_context_visual in outputs:
+        if opts.align_output:
+            visual_offset = prefix_width + 1 + left_context_visual
+            pad = " " * (max_visual_offset - visual_offset + 1)
+            print(f"{prefix_str}{pad}{context_str}")
+        else:
+            print(f"{prefix_str}{context_str}")
 
 
 if __name__ == "__main__":
-    main(sys.argv[1:])
+    opts = parse_args(sys.argv[1:])
+    main(opts)

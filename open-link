@@ -1,0 +1,50 @@
+#!/usr/bin/env python3
+
+from __future__ import annotations
+import subprocess
+import sys
+
+import typing
+from time import sleep
+
+T = typing.TypeVar("T")
+
+
+def chunks(
+    l: typing.Sequence[T],
+    n: int,
+) -> typing.Generator[typing.Sequence[T], None, None]:
+    for i in range(0, len(l), n):
+        yield l[i : i + n]
+
+def start(s: str):
+    subprocess.Popen(["cmd.exe", "/c", "start", "", s])
+
+
+def arg(
+    i: int,
+    map_func: typing.Callable[[str], T] = str,
+) -> T | None:
+    import sys
+
+    try:
+        v = sys.argv[i]
+        return map_func(v)
+    except IndexError:
+        return None
+
+def main() -> None:
+    lines  = sys.stdin.read().splitlines()
+    chunk_size = arg(1, int) or 4
+    sleep_secs = arg(2, int) or 3
+    for line_chunks in chunks(lines, chunk_size):
+        for line in line_chunks:
+            inp = line.strip()
+            if not inp:
+                continue
+            print(f"open {inp}")
+            start(inp)
+        sleep(sleep_secs)
+
+if __name__ == "__main__":
+    main()

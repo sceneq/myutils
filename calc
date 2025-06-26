@@ -1,0 +1,43 @@
+#!/usr/bin/env python3
+
+from __future__ import annotations
+import re
+
+units = {
+    "京": 10**16,
+    "兆": 10**12,
+    "億": 10**8,
+    "万": 10**4,
+}
+
+unit_pattern = re.compile(r'(\d+)(' + "|".join(units.keys()) + ")")
+
+def japanese_to_number(expr: str) -> str:
+
+    def replacer(match: re.Match) -> str:
+        number = int(match.group(1))
+        unit = match.group(2)
+        return str(number * units[unit])
+
+    pattern = re.compile(unit_pattern)
+    return pattern.sub(replacer, expr)
+
+def format_japanese_number(value: int) -> str:
+    parts = []
+    for unit, base in units.items():
+        if value >= base:
+            unit_value = value // base
+            value %= base
+            parts.append(f"{unit_value}{unit}")
+    if value > 0 or not parts:
+        parts.append(str(value))
+    return ''.join(parts)
+
+def calculate_and_format(expr: str) -> str:
+    numeric_expr = japanese_to_number(expr)
+    result = eval(numeric_expr)
+    return format_japanese_number(result)
+
+if __name__ == "__main__":
+    for l in open(0).read().splitlines():
+        print(calculate_and_format(l))

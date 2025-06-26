@@ -3,6 +3,6 @@ set -o errexit -o errtrace -o noclobber -o pipefail -o nounset
 
 for file in "$@"; do
   tmp="${file}.dos"
-  sed 's/$/\r/' "$file" > "$tmp"
+  sed 's/\r$//' "$file" > "$tmp"
   mv "$tmp" "$file"
 done

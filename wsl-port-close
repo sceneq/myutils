@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+
+set -o errexit -o errtrace -o noclobber -o pipefail -o nounset -x
+
+cd "$(dirname "$0")"
+
+PORT=$1
+HOST_IPV4=$(powershell.exe -Command "Get-NetIPAddress | Where-Object { \
+  \$_.AddressFamily -eq 'IPv4' -and \
+  \$_.InterfaceAlias -notmatch 'Loopback|WSL' -and \
+  \$_.AddressState -eq 'Preferred' -and \
+  \$_.IPAddress -notmatch '^169\.254\.' \
+} | Select-Object -ExpandProperty IPAddress" | tr -d '\r')
+
+echo "removing port forward for $HOST_IPV4:$PORT"
+gsudo netsh.exe interface portproxy delete v4tov4 \
+  listenaddress=$HOST_IPV4 \
+  listenport=$PORT

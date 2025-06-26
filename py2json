@@ -1,0 +1,15 @@
+#!/usr/bin/env python
+
+from __future__ import annotations
+import sys
+import json
+import ast
+from typing import Any
+
+def main() -> None:
+    text: str = open(0).read()
+    obj: dict[str, Any] = ast.literal_eval(text)
+    print(json.dumps(obj))
+
+if __name__ == "__main__":
+    main()

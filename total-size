@@ -1,0 +1,20 @@
+#!/usr/bin/env python
+from __future__ import annotations
+import sys
+import os
+from typing import Iterator
+
+def total_size(paths: Iterator[str]) -> int:
+    total: int = 0
+    for line in paths:
+        path: str = line.rstrip("\n")
+        try:
+            size = os.path.getsize(path)
+            total += size
+        except OSError:
+            # ファイルにアクセスできない場合はスキップします
+            continue
+    return total
+
+if __name__ == "__main__":
+    print(total_size(sys.stdin))

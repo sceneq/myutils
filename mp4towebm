@@ -15,7 +15,20 @@ for f in argv[1:]:
 
     out = join(dirname(f), f"{stem}.{EXT}")
 
-    cmd = ['ffmpeg.exe', "-hwaccel", "cuda", "-i", f, out]
+    cmd = [
+        "ffmpeg.exe",
+        "-i",
+        f,
+        "-c:v",
+        "libvpx-vp9",
+        "-minrate",
+        "500k",
+        "-b:v",
+        "2000k",
+        "-maxrate",
+        "2500k",
+        out,
+    ]
 
     print(cmd)
     r = run(cmd, stdout=stdout)

@@ -1,0 +1,11 @@
+#! /usr/bin/env python3
+
+from __future__ import annotations
+
+ls: list[str] = open(0).read().splitlines()
+
+empty_line = ls.index("")
+b = set(ls[empty_line:])
+for a in ls[:empty_line]:
+    if a not in b:
+        print(a)

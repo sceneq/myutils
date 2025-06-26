@@ -1,0 +1,51 @@
+#!/usr/bin/env python
+
+from __future__ import annotations
+import sys
+import json
+from pathlib import Path
+from email import policy
+from email.parser import BytesParser
+from typing import Any
+
+def extract_headers(msg) -> dict[str, str]:
+    return {k: str(v) for (k, v) in msg.items()}
+
+def extract_body(msg) -> str:
+    if msg.is_multipart():
+        for part in msg.walk():
+            if part.get_content_type() == "text/plain":
+                return part.get_content()
+        for part in msg.walk():
+            if part.get_content_type() == "text/html":
+                return part.get_content()
+        return ""
+    else:
+        if msg.get_content_type() == "text/plain":
+            return msg.get_content()
+        elif msg.get_content_type() == "text/html":
+            return msg.get_content()
+        return ""
+
+def eml_to_json(eml_path: Path) -> dict[str, Any]:
+    with eml_path.open("rb") as f:
+        msg = BytesParser(policy=policy.default).parse(f)
+    return {
+        "filename": str(eml_path),
+        "headers": extract_headers(msg),
+        "body": extract_body(msg)
+    }
+
+def main(file_list: list[str]) -> None:
+    results = []
+    for file in file_list:
+        try:
+            result = eml_to_json(Path(file))
+            results.append(result)
+        except Exception as e:
+            print(e)
+            continue
+    print(json.dumps(results, ensure_ascii=False, indent=2))
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

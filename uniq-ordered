@@ -7,7 +7,7 @@ if len(sys.argv) >= 2 and sys.argv[1] == "-w":
     # 空白を無視する
     import re
 
-    skip = re.compile(r"^\r?\n|^#")
+    skip = re.compile(r"^\r?\n|^#|^$")
 
     s = set()
     for r in open(0).read().splitlines():

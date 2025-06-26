@@ -1,0 +1,35 @@
+#!/usr/bin/env python3
+# coding: utf-8
+
+# PHPUnitのsnapshotが日本語を変なエスケープして保存するので、元の文字列を復元する
+
+import re
+from html.entities import name2codepoint
+
+def decode_entity_sequence(seq: str) -> str:
+    tokens = re.findall(r'&(#x[0-9A-Fa-f]+|#\d+|\w+);', seq)
+    byte_vals = []
+    for token in tokens:
+        if token.lower().startswith('#x'):
+            cp = int(token[2:], 16)
+        elif token.startswith('#'):
+            cp = int(token[1:], 10)
+        else:
+            cp = name2codepoint.get(token)
+            if cp is None:
+                raise ValueError(f"未定義のエンティティ: &{token};")
+        byte_vals.append(cp & 0xFF)
+    return bytes(byte_vals).decode('utf-8')
+
+def restore_text(text: str) -> str:
+    pattern = r'(?:&(?:#x[0-9A-Fa-f]+|#\d+|\w+);)+'
+    return re.sub(pattern, lambda m: decode_entity_sequence(m.group(0)), text)
+
+#input_text = """あ &atilde;&#131;&#147; い"""
+#restored = restore_text(input_text)
+#print(restored == "あ ビ い", restored)
+
+input_text = open(0).read()
+restored = restore_text(input_text)
+print(restored)
+
