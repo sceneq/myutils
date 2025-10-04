@@ -15,7 +15,7 @@ for file in "$@"; do
     fi
 done
 
-# 最後のファイル以外の各ファイルに対してvimdiffを実行
+# vimdiff
 for ((i=1; i<=$#-1; i++)); do
     if ! nvim -d "${!i}" "$lastfile"; then
         echo "Error: vimdiff failed for ${!i} and $lastfile"

@@ -60,6 +60,12 @@ def parse_args(args: list[str]) -> Opts:
     rg_opt = []
     i = 0
     while i < len(args):
+        if args[i] in ("--"):
+            rg_opt.extend(args[i+1:])
+            break
+        if args[i] in ("-h", "--help"):
+            print_help_text()
+            sys.exit(0)
         if args[i] == "--bytes-before":
             context_bytes_before = int(args[i + 1])
             i += 2
@@ -102,6 +108,29 @@ def parse_args(args: list[str]) -> Opts:
         use_color=use_color,
         rg_opt=rg_opt,
     )
+
+def print_help_text() -> None:
+    print("""
+Usage: script.py [OPTIONS] [--] <rg-args...>
+  Read ripgrep (--json) output and print aligned one-line contexts.
+
+Options (this script):
+  --bytes-before N   N bytes of left context
+  --bytes-after N    N bytes of right context
+  --bytes N          both sides N bytes
+  --no-align         disable alignment
+  --color            force color
+  --no-color         force no color
+  -h, --help         show this help
+  --help=json        show JSON help (LLM-friendly)
+
+Defaults:
+  context: before=int(columns*0.3), after=int(columns*0.7)
+  color: enabled if stdout is a TTY
+
+Notes:
+  All non-script options are passed through to rg. --json is added automatically.
+""".rstrip())
 
 
 def main(opts: Opts):

@@ -1,0 +1,222 @@
+#!/usr/bin/env python3
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import sys
+from argparse import ArgumentParser, Namespace
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Iterator, Sequence
+
+
+@dataclass
+class LogEntry:
+    timestamp: datetime
+    message: str
+    start_line: int
+
+
+class LogParser:
+    def __init__(self) -> None:
+        self.entries: list[LogEntry] = []
+        self.current_date: datetime | None = None
+
+    def parse(self, text: str) -> list[LogEntry]:
+        for line_number, row in enumerate(text.splitlines(), start=1):
+            if match := re.match(r"(\d{4}/\d{1,2}/\d{1,2})", row):
+                self.current_date = datetime.strptime(match.group(1), "%Y/%m/%d")
+                continue
+            if match := re.match(r"(\d{1,2}):(\d{1,2})(?: (.+)|$)", row):
+                if not self.current_date:
+                    continue
+                hour_str, minute_str, message = match.groups()
+                hour = int(hour_str)
+                minute = int(minute_str)
+                add_to_day = 1 if hour >= 24 else 0
+                if hour >= 24:
+                    hour -= 24
+                timestamp = datetime.combine(
+                    self.current_date + timedelta(days=add_to_day),
+                    datetime(1900, 1, 1, hour=hour, minute=minute).time(),
+                )
+                self.entries.append(
+                    LogEntry(
+                        timestamp=timestamp,
+                        message=(message or "").strip(),
+                        start_line=line_number,
+                    )
+                )
+                continue
+            if self.entries:
+                self.entries[-1].message += "\n" + row
+        return self.entries
+
+
+def _parse_boundary(value: str, *, inclusive_end: bool) -> datetime:
+    """Parse a boundary specification.
+
+    >>> _parse_boundary("2024/09/01", inclusive_end=False)
+    datetime.datetime(2024, 9, 1, 0, 0)
+    >>> _parse_boundary("2024/09/01", inclusive_end=True)
+    datetime.datetime(2024, 9, 1, 23, 59, 59, 999999)
+    >>> _parse_boundary("2024/09/01 08:10", inclusive_end=False)
+    datetime.datetime(2024, 9, 1, 8, 10)
+    """
+
+    patterns = ("%Y/%m/%d %H:%M:%S", "%Y/%m/%d %H:%M", "%Y/%m/%d")
+    for pattern in patterns:
+        try:
+            parsed = datetime.strptime(value.replace("-", "/"), pattern)
+        except ValueError:
+            continue
+        if pattern == "%Y/%m/%d" and inclusive_end:
+            return parsed + timedelta(days=1) - timedelta(microseconds=1)
+        return parsed
+    raise ValueError(f"invalid timestamp format: {value}")
+
+
+def discover_default_files(root: Path) -> list[Path]:
+    if not root.exists():
+        raise RuntimeError(f"ディレクトリが存在しません: {root}")
+    if not root.is_dir():
+        raise RuntimeError(f"ディレクトリではありません: {root}")
+
+    paths = sorted(p for p in root.rglob("*日記*") if p.is_file())
+    return paths
+
+
+def build_parser() -> ArgumentParser:
+    parser = ArgumentParser()
+    parser.add_argument("files", nargs="*", help="入力ファイル")
+    parser.add_argument("-v", "--invert", default=False, action="store_true")
+    parser.add_argument(
+        "-f", "--filter", help="message フィールドに対する正規表現フィルタ"
+    )
+    parser.add_argument("--since", help="この日時以降を抽出 (YYYY/MM/DD[ HH:MM[:SS]])")
+    parser.add_argument("--until", help="この日時以前を抽出 (YYYY/MM/DD[ HH:MM[:SS]])")
+    return parser
+
+
+def filter_entries(
+    entry: LogEntry,
+    *,
+    since: datetime | None,
+    until: datetime | None,
+    pattern: re.Pattern[str] | None,
+    invert: bool,
+) -> bool:
+    if since and entry.timestamp < since:
+        return False
+    if until and entry.timestamp > until:
+        return False
+    if pattern:
+        matched = bool(pattern and pattern.search(entry.message))
+        if invert ^ matched is False:  # invert XOR matched
+            return False
+    return True
+
+
+def entry_to_record(
+    id: int,
+    entry: LogEntry,
+    path: Path,
+    root: Path,
+) -> dict[str, object]:
+    """Convert an entry to a JSON-serialisable record.
+
+    >>> sample = LogEntry(datetime(2024, 9, 1, 7, 30), "text", 2)
+    >>> _entry_to_record(1, sample, Path("/tmp/log.txt"))
+    {'ID': 1, 'message': 'text', 'length': 4, 'file': '/tmp/log.txt', 'line': 2, 'timestamp_iso': '2024-09-01T07:30:00'}
+    """
+
+    return {
+        "ID": id,
+        "message": entry.message,
+        "length": len(entry.message),
+        "file": path.relative_to(root).__str__(),
+        "line": entry.start_line,
+        # "timestamp": entry.timestamp.strftime("%Y/%m/%d %H:%M"),
+        "timestamp_iso": entry.timestamp.isoformat(),
+    }
+
+
+def resolve_files(args: Namespace, root: Path) -> list[Path]:
+    if args.files:
+        return [Path(value) for value in args.files]
+    try:
+        discovered = discover_default_files(root)
+    except RuntimeError as exc:
+        raise SystemExit(str(exc)) from exc
+    if not discovered:
+        raise SystemExit("日記ファイルを見つけられませんでした。")
+    return discovered
+
+
+def resolve_bounds(
+    args: Namespace, parser: ArgumentParser
+) -> tuple[datetime | None, datetime | None]:
+    try:
+        since = _parse_boundary(args.since, inclusive_end=False) if args.since else None
+        until = _parse_boundary(args.until, inclusive_end=True) if args.until else None
+    except ValueError as exc:
+        parser.error(str(exc))
+    return since, until
+
+
+def iter_records(
+    files: Sequence[Path],
+    root: Path,
+    *,
+    since: datetime | None,
+    until: datetime | None,
+    pattern: re.Pattern[str] | None,
+    invert: bool,
+) -> Iterator[dict[str, object]]:
+    id = 0
+    for path in files:
+        text = path.read_text(encoding="utf-8")
+        entries = LogParser().parse(text)
+        for entry in entries:
+            id += 1
+            if filter_entries(
+                entry, since=since, until=until, pattern=pattern, invert=invert
+            ):
+                yield entry_to_record(id, entry, path, root)
+
+
+def files_root() -> Path:
+    base = os.environ.get("M")
+    if not base:
+        raise RuntimeError(
+            "環境変数Mが未設定です。デフォルトファイルを特定できません。"
+        )
+    return Path(base) / "memo" / "android"
+
+
+def run(argv: Sequence[str] | None = None) -> int:
+    root = files_root()
+
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    since, until = resolve_bounds(args, parser)
+    pattern = re.compile(args.filter) if args.filter else None
+    files = resolve_files(args, root)
+
+    for record in iter_records(
+        files,
+        root,
+        since=since,
+        until=until,
+        pattern=pattern,
+        invert=args.invert,
+    ):
+        print(json.dumps(record, ensure_ascii=False))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(run())

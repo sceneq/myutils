@@ -10,7 +10,7 @@ HOST_IPV4=$(powershell.exe -Command "Get-NetIPAddress | Where-Object { \
   \$_.InterfaceAlias -notmatch 'Loopback|WSL' -and \
   \$_.AddressState -eq 'Preferred' -and \
   \$_.IPAddress -notmatch '^169\.254\.' \
-} | Select-Object -ExpandProperty IPAddress" | tr -d '\r')
+} | Select-Object -ExpandProperty IPAddress")
 
 echo "removing port forward for $HOST_IPV4:$PORT"
 gsudo netsh.exe interface portproxy delete v4tov4 \

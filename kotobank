@@ -10,8 +10,6 @@
 
 from __future__ import annotations
 
-from typing import List, Sequence, Tuple, Dict, Mapping, Set, Optional, Union
-from os.path import exists, join, splitext, basename
 import sys
 from time import sleep
 

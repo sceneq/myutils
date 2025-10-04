@@ -35,13 +35,15 @@ def arg(
 
 def main() -> None:
     lines  = sys.stdin.read().splitlines()
-    chunk_size = arg(1, int) or 4
+    chunk_size = arg(1, int) or 2
     sleep_secs = arg(2, int) or 3
     for line_chunks in chunks(lines, chunk_size):
         for line in line_chunks:
             inp = line.strip()
             if not inp:
                 continue
+            if not inp.startswith("http"):
+                inp = f"https://{inp}"
             print(f"open {inp}")
             start(inp)
         sleep(sleep_secs)

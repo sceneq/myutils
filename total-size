@@ -11,8 +11,7 @@ def total_size(paths: Iterator[str]) -> int:
         try:
             size = os.path.getsize(path)
             total += size
-        except OSError:
-            # ファイルにアクセスできない場合はスキップします
+        except OSError as e:
             continue
     return total
 
