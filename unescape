@@ -1,0 +1,3 @@
+#!/usr/bin/env python3
+import sys
+sys.stdout.write(open(0).read().encode().decode("unicode_escape"))

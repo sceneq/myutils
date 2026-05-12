@@ -1,0 +1,317 @@
+#!/usr/bin/env python
+from __future__ import annotations
+
+import json
+import os
+import sys
+import textwrap
+from dataclasses import dataclass, field
+from pathlib import Path
+
+
+@dataclass
+class Turn:
+    role: str  # "user" | "assistant"
+    timestamp: str
+    texts: list[str]  # テキストブロック
+    tools: list[str]  # tool_use の name / tool_result の tool_use_id
+
+
+@dataclass
+class Session:
+    session_id: str
+    project: str
+    turns: list[Turn] = field(default_factory=list)
+
+    @property
+    def user_message_count(self) -> int:
+        return sum(1 for t in self.turns if t.role == "user" and t.texts)
+
+
+def extract_turn(raw: dict) -> Turn | None:
+    role = raw.get("type")
+    if role not in ("user", "assistant"):
+        return None
+
+    msg = raw.get("message") or {}
+    ts = raw.get("timestamp", "")
+    content = msg.get("content", [])
+    texts: list[str] = []
+    tools: list[str] = []
+
+    if isinstance(content, str):
+        if content.strip():
+            texts.append(content.strip())
+    elif isinstance(content, list):
+        for blk in content:
+            t = blk.get("type", "")
+            if t == "text":
+                v = blk.get("text", "").strip()
+                if v:
+                    texts.append(v)
+            elif t == "tool_use":
+                tools.append(blk.get("name", "?"))
+            elif t == "tool_result":
+                # tool_use_id で何に対する結果かを示す
+                tools.append(f"result:{blk.get('tool_use_id', '?')[:8]}")
+
+    if not texts and not tools:
+        return None
+    return Turn(role=role, timestamp=ts, texts=texts, tools=tools)
+
+
+def load_jsonl(path: Path) -> list[dict]:
+    rows = []
+    with path.open(encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            rows.append(json.loads(line))
+    return rows
+
+
+def build_session(path: Path, project_name: str) -> Session:
+    rows = load_jsonl(path)
+    session_id = path.stem
+
+    # session_id が埋め込まれている行から取得を試みる
+    for row in rows:
+        if sid := (row.get("sessionId") or row.get("session_id")):
+            session_id = sid
+            break
+
+    sess = Session(session_id=session_id, project=project_name)
+    for row in rows:
+        turn = extract_turn(row)
+        if turn:
+            sess.turns.append(turn)
+    return sess
+
+
+def dedup_branches(sessions: list[Session]) -> list[Session]:
+    """同一 session_id は user_message_count 最多のものだけ残す。"""
+    best: dict[str, Session] = {}
+    for s in sessions:
+        prev = best.get(s.session_id)
+        if prev is None or s.user_message_count > prev.user_message_count:
+            best[s.session_id] = s
+    return list(best.values())
+
+
+def collect_projects(projects_dir: Path) -> list[tuple[str, list[Session]]]:
+    """プロジェクトディレクトリごとにセッションをまとめて返す。
+    戻り値: [(project_name, [Session, ...]), ...]  古い順ソート済み"""
+    result: list[tuple[str, list[Session]]] = []
+    for proj_dir in sorted(projects_dir.iterdir()):
+        if not proj_dir.is_dir():
+            continue
+        sessions: list[Session] = []
+        for jsonl in sorted(proj_dir.glob("*.jsonl")):
+            try:
+                sessions.append(build_session(jsonl, proj_dir.name))
+            except Exception as e:
+                print(f"[skip] {jsonl}: {e}", file=sys.stderr)
+        sessions = dedup_branches(sessions)
+        # セッションが実質空のプロジェクトは除外
+        sessions = [
+            s for s in sessions if any(t.role == "user" and t.texts for t in s.turns)
+        ]
+        if not sessions:
+            continue
+        # 古い順
+        sessions.sort(key=lambda s: s.turns[0].timestamp if s.turns else "")
+        result.append((proj_dir.name, sessions))
+    # プロジェクト自体も最初のセッションの timestamp で古い順
+    result.sort(
+        key=lambda x: x[1][0].turns[0].timestamp if x[1] and x[1][0].turns else ""
+    )
+    return result
+
+
+def get_args():
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--stdout", action="store_true", help="print to stdout")
+    parser.add_argument("--projects", type=Path, default=None, help="projects dir")
+    parser.add_argument("--dump-root", type=Path, default=Path("claude-insights"))
+    args = parser.parse_args()
+    return args
+
+ARGS = get_args()
+
+def _ansi(code: str) -> str:
+    return code if sys.stdout.isatty() and ARGS.stdout == True else ""
+
+
+RESET = _ansi("\033[0m")
+BOLD = _ansi("\033[1m")
+DIM = _ansi("\033[2m")
+CYAN = _ansi("\033[36m")
+YELLOW = _ansi("\033[33m")
+GREEN = _ansi("\033[32m")
+MAGENTA = _ansi("\033[35m")
+
+WIDTH = 100
+
+# tool_use で表示しないツール名
+HIDDEN_TOOLS = {
+    "Grep",
+    "Read",
+    # "Write",
+    "Edit",
+    "Bash",
+}
+
+
+def _should_ignore(text: str) -> bool:
+    return text == "No response requested." or text.startswith("<local-command-caveat>")
+
+
+def wrap(text: str, indent: int = 4) -> str:
+    prefix = " " * indent
+    return textwrap.fill(
+        text, width=WIDTH, initial_indent=prefix, subsequent_indent=prefix
+    )
+
+
+def display_turn(turn: Turn, prev: Turn | None) -> str:
+    from datetime import datetime, timedelta
+
+    # 日時。前回からthreshold以内なら省略
+    ts_short = ""
+    threshold = timedelta(minutes=30)
+    if turn.timestamp:
+        ts_short = turn.timestamp[:19].replace("T", " ")
+        if prev and prev.timestamp:
+            prev_dt = datetime.fromisoformat(prev.timestamp[:19])
+            curr_dt = datetime.fromisoformat(turn.timestamp[:19])
+            if (curr_dt - prev_dt) < threshold:
+                ts_short = ""
+
+    lines = []
+
+    if turn.role == "assistant":
+        for name in turn.tools:
+            if name.startswith("result:") or name in HIDDEN_TOOLS:
+                continue
+            lines.append(f"{DIM}[tool] {name}{RESET}")
+        for text in turn.texts:
+            lines.append(f"{DIM}{GREEN}Claude:{RESET} {DIM}{ts_short}{RESET}")
+            lines.append(wrap(text[:500] + ("…" if len(text) > 500 else ""), 2))
+    else:
+        if not turn.texts:
+            return ""
+        visible_texts = [t for t in turn.texts if not _should_ignore(t)]
+        if not visible_texts:
+            return ""
+
+        context_line = ""
+        if prev and prev.role == "assistant" and prev.tools:
+            names = ", ".join(
+                t
+                for t in prev.tools
+                if not t.startswith("result:") and t not in HIDDEN_TOOLS
+            )
+            if names:
+                context_line = f"{DIM}↳ after tools: {names}{RESET}"
+
+        if context_line:
+            lines.append(context_line)
+        lines.append(f"{BOLD}{YELLOW}User:{RESET} {DIM}{ts_short}{RESET}")
+        for text in visible_texts:
+            if "[Request interrupted" in text:
+                lines.append(f"  {DIM}{text}{RESET}")
+            else:
+                lines.append(wrap(text[:800] + ("…" if len(text) > 800 else ""), 2))
+
+    return "\n".join(lines)
+
+
+def print_turn(turn: Turn, prev: Turn | None) -> None:
+    output = display_turn(turn, prev)
+    if output:
+        print(output)
+
+
+def print_project_header(project_name: str) -> None:
+    print()
+    print("═" * WIDTH)
+    print(f"{BOLD}{MAGENTA}Project:{RESET} {project_name}")
+    print("═" * WIDTH)
+
+
+def print_session(sess: Session) -> None:
+    if not any(t.role == "user" and t.texts for t in sess.turns):
+        return
+
+    # ヘッダー
+    first_ts = next(
+        (t.timestamp[:19].replace("T", " ") for t in sess.turns if t.timestamp), ""
+    )
+    print()
+    print("─" * WIDTH)
+    print(
+        f"{BOLD}{CYAN}  Session:{RESET} {sess.session_id[:16]}  {DIM}{first_ts}{RESET}"
+    )
+    print("─" * WIDTH)
+
+    prev: Turn | None = None
+    for turn in sess.turns:
+        print_turn(turn, prev)
+        prev = turn
+
+
+def dump_session(project_root: Path, sess: Session):
+    if not any(t.role == "user" and t.texts for t in sess.turns):
+        return
+
+    # ヘッダー
+    first_ts_raw = next((t for t in sess.turns if t.timestamp))
+    first_ts = (
+        first_ts_raw.timestamp[:19].replace("T", "").replace("-", "").replace(":", "")
+    )
+
+    session_path = project_root / f"{first_ts}_{sess.session_id}"
+    lines = []
+    prev: Turn | None = None
+    for turn in sess.turns:
+        lines.append(display_turn(turn, prev))
+        prev = turn
+    session_path.write_text("\n".join(lines))
+
+
+def main() -> None:
+    # projects_dir = Path(os.environ.get("CLAUDE_CONFIG_DIR", Path.home() / ".claude")) / "projects"
+
+    if ARGS.projects:
+        projects_dir = ARGS.projects
+    else:
+        w = os.environ.get("W")
+        if not w:
+            raise RuntimeError("w")
+        projects_dir = Path(w) / ".claude" / "projects"
+
+    if not projects_dir.exists():
+        sys.exit(f"projects dir not found: {projects_dir}")
+
+    projects = collect_projects(projects_dir)
+
+    if ARGS.stdout:
+        for project_name, sessions in projects:
+            print_project_header(project_name)
+            for sess in sessions:
+                print_session(sess)
+    else:
+        dump_root = ARGS.dump_root
+        dump_root.mkdir(exist_ok=True)
+        for project_name, sessions in projects:
+            project_root = dump_root / project_name
+            project_root.mkdir(exist_ok=True)
+            for sess in sessions:
+                dump_session(project_root, sess)
+
+
+if __name__ == "__main__":
+    main()

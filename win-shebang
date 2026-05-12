@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+
+# win-shebang: WSL→Windows exe 用のshebangブリッジ
+# 使い方: #!/usr/bin/env -S win-shebang uv.exe run --script
+
+# $@ = "uv.exe run --script renso ヒネ"
+
+file_path_idx=3  # ウーン
+args=("$@")
+script_path="${args[$file_path_idx]}"
+converted_path=$(wslpath -w "$script_path")
+args["$file_path_idx"]="$converted_path"
+
+"${args[@]}"

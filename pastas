@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Original: https://codeberg.org/EvanHahn/dotfiles/src/commit/843b9ee13d949d346a4a73ccee2a99351aed285b/home/bin/bin/pastas
+set -e
+set -u
+set -o pipefail
+
+trap 'exit 0' SIGINT
+
+last_value=''
+counter=1
+line_mode=false
+
+if [ "$#" -gt 0 ] && { [ "$1" = "-l" ] || [ "$1" = "--line" ]; }; then
+  line_mode=true
+fi
+
+while true
+do
+  value="$(pasta)"
+
+  if [ "$last_value" != "$value" ]; then
+    if [ "$line_mode" = true ]; then
+      echo "$counter. $value"
+      counter=$((counter + 1))
+    else
+      echo "$value"
+    fi
+    last_value="$value"
+  fi
+
+  sleep 0.1
+done

@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -o errexit -o errtrace -o noclobber -o pipefail -o nounset
+
+# ファイル名に拡張子をつける
+
+for file in $@; do
+  if [[ ! -f "$file" ]]; then
+	  continue
+  fi
+
+  # 既に拡張子がある場合
+  if [[ ! "$file" != *.* ]]; then
+    continue
+  fi
+
+  mime_type=$(file --mime-type -b "$file")
+  ext="${mime_type#*/}"
+  echo mv "$file" "$file.$ext"
+  mv --no-clobber "$file" "$file.$ext"
+done

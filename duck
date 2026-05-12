@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+
+# vimからduckdbを呼び出す
+
+duckdb_opts=()
+query_parts=()
+
+for arg in "$@"; do
+    if [[ "$arg" == -* ]]; then
+        duckdb_opts+=("$arg")
+    else
+        query_parts+=("$arg")
+    fi
+done
+
+if [ ${#duckdb_opts[@]} -eq 0 ]; then
+    duckdb_opts=("-csv")
+fi
+
+duckdb "${duckdb_opts[@]}" -c "FROM read_csv_auto('/dev/stdin') ${query_parts[*]}"

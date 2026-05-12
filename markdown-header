@@ -1,0 +1,89 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import re
+from pathlib import Path
+
+
+def extract_headers(content: str) -> list[tuple[int, int, str]]:
+    headers = []
+    for line_no, line in enumerate(content.splitlines(), start=1):
+        if match := re.match(r"^(#{1,6})\s+(.+)$", line):
+            level = len(match.group(1))
+            text = match.group(2)
+            headers.append((level, line_no, text))
+    return headers
+
+
+def filter_headers(
+    headers: list[tuple[int, int, str]],
+    pattern: str | None,
+    expand_level: int | None,
+) -> list[tuple[int, int, str]]:
+    if not pattern:
+        if expand_level is None:
+            return headers
+        return [
+            (level, line_no, text)
+            for level, line_no, text in headers
+            if level <= expand_level
+        ]
+
+    result = []
+    matched_indices = set()
+
+    for i, (level, line_no, text) in enumerate(headers):
+        if re.search(pattern, text):
+            matched_indices.add(i)
+
+    for i, (level, line_no, text) in enumerate(headers):
+        if i in matched_indices:
+            result.append((level, line_no, text))
+            matched_level = level
+            if expand_level is not None:
+                for j in range(i + 1, len(headers)):
+                    next_level, next_line_no, next_text = headers[j]
+                    if next_level <= matched_level:
+                        break
+                    if next_level <= matched_level + expand_level - 1:
+                        result.append((next_level, next_line_no, next_text))
+
+    return result
+
+
+def get_line_ranges(
+    headers: list[tuple[int, int, str]], total_lines: int
+) -> list[tuple[int, int, int, str]]:
+    result = []
+    for i, (level, line_no, text) in enumerate(headers):
+        if i + 1 < len(headers):
+            end_line = headers[i + 1][1] - 1
+        else:
+            end_line = total_lines
+        result.append((level, line_no, end_line, text))
+    return result
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Extract headers from markdown file")
+    parser.add_argument("file", type=Path, help="Markdown file path")
+    parser.add_argument("-g", "--grep", help="Grep pattern for headers")
+    parser.add_argument(
+        "-l", "--level", type=int, help="Expand level (default: all if not specified)"
+    )
+
+    args = parser.parse_args()
+
+    content = args.file.read_text()
+    total_lines = len(content.splitlines())
+    headers = extract_headers(content)
+    filtered = filter_headers(headers, args.grep, args.level)
+    line_ranges = get_line_ranges(filtered, total_lines)
+
+    for level, start_line, end_line, text in line_ranges:
+        print(f"L{start_line}-{end_line} {'#' * level} {text}")
+
+
+if __name__ == "__main__":
+    main()

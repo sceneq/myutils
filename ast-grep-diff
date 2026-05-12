@@ -1,0 +1,179 @@
+#!/usr/bin/env python
+
+from __future__ import annotations
+
+import json
+import re
+import subprocess
+from dataclasses import dataclass, field
+from typing import TypedDict
+
+def is_wsl() -> bool:
+    import os
+    return os.getcwd().startswith("/mnt/")
+
+
+def git_diff() -> str:
+    git = "git.exe" if is_wsl() else "git"
+    return subprocess.check_output(
+        [git, "diff", "--unified=0", "HEAD"],
+        text=True,
+    )
+
+
+def ast_grep_scan() -> AstGrepResult:
+    p = subprocess.run(
+        ["ast-grep", "scan", "--json"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return json.loads(p.stdout)
+
+#
+# ast-grep
+#
+
+
+class ByteRange(TypedDict):
+    start: int
+    end: int
+
+
+class Position(TypedDict):
+    line: int
+    column: int
+
+
+class SourceRange(TypedDict):
+    byteOffset: ByteRange
+    start: Position
+    end: Position
+
+
+class CharCount(TypedDict):
+    leading: int
+    trailing: int
+
+
+class Label(TypedDict):
+    text: str
+    range: SourceRange
+    style: str
+
+
+class AstGrepMatch(TypedDict):
+    text: str
+    range: SourceRange
+    file: str
+    lines: str
+    charCount: CharCount
+    language: str
+    ruleId: str
+    severity: str
+    # note: Any
+    message: str
+    labels: list[Label]
+
+
+type AstGrepResult = list[AstGrepMatch]
+
+
+#
+# Git
+#
+@dataclass(slots=True)
+class LineRange:
+    start: int
+    end: int
+
+
+@dataclass(slots=True)
+class FileDiff:
+    path: str
+    ranges: list[LineRange] = field(default_factory=list)
+
+
+def contains_line(ranges: list[LineRange], line: int) -> bool:
+    for r in ranges:
+        if r.start <= line <= r.end:
+            return True
+    return False
+
+
+def parse_git_diff(diff: str) -> dict[str, FileDiff]:
+    result: dict[str, FileDiff] = {}
+
+    cur: str | None = None  # file path
+
+    for line in diff.splitlines():
+        if line.startswith("+++ b/"):
+            cur = line.removeprefix("+++ b/")
+
+            if cur not in result:
+                result[cur] = FileDiff(path=cur)
+
+            continue
+
+        if not line.startswith("@@"):
+            continue
+
+        m = re.search(r"\+(\d+)(?:,(\d+))?", line)
+        if not m:
+            continue
+
+        start = int(m.group(1))
+        count = int(m.group(2) or "1")
+
+        if count == 0:
+            continue
+
+        assert cur is not None
+        result[cur].ranges.append(
+            LineRange(
+                start=start,
+                end=start + count - 1,
+            )
+        )
+
+    return result
+
+
+#
+#
+#
+
+
+def ast_grep_match_fmt(m: AstGrepMatch):
+    return f"{m['file']}:{m['range']['start']['line']} {m['ruleId']}"
+
+
+def print_ast_grep_errors_in_diff() -> int:
+    diffs = parse_git_diff(git_diff())
+    diff_index = {d.path: d.ranges for d in diffs.values()}
+
+    matches = ast_grep_scan()
+
+    returncode = 0
+    for match in matches:
+        path = match["file"]
+
+        ranges = diff_index.get(path)
+        if ranges is None:
+            continue
+
+        line = match["range"]["start"]["line"]
+
+        if not contains_line(
+            ranges,
+            line + 1,  # gitの1-basedに合わせる
+        ):
+            continue
+
+        returncode = 1
+        print(ast_grep_match_fmt(match))
+
+    return returncode
+
+
+exit(print_ast_grep_errors_in_diff())

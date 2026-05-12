@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+
+echo "=== 過去1年の変更頻度の高いファイル ==="
+git log --format=format: --name-only --since="1 year ago" | sort | uniq -c | sort -nr | head -20
+
+echo
+echo "=== 貢献者別コミット数 ==="
+git shortlog -sn --no-merges
+
+echo
+echo "=== バグはどこに集中するか ==="
+git log -i -E --grep="fix|bug|broke|修正|バグ" --name-only --format='' | sort | uniq -c | sort -nr | head -20
+
+echo
+echo "=== 月ごとのコミット数 ==="
+git log --format='%ad' --date=format:'%Y-%m' | sort | uniq -c
+
+echo
+echo "=== 過去1年のリバート・緊急対応コミット ==="
+git log --oneline --since="1 year ago" | grep -iE 'revert|hotfix|emergency|rollback|リバート|差し戻し'

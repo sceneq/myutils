@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+b='\\b'; [ "$1" = -n ] && b=
+while IFS= read -r line || [ -n "$line" ]; do
+    printf "${b}(%s)${b}|" "$line"
+done | sed 's/|$/\n/'

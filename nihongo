@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+
+#
+echo 'あいうえお　アイウエオ'
+echo 'かきくけこ　カキクケコ'
+echo 'さしすせそ　サシスセソ'
+echo 'たちつてと　タチツテト'
+echo 'なにぬねの　ナニヌネノ'
+echo 'はひふへほ　ハヒフヘホ'
+echo 'まみむめも　マミムメモ'
+echo 'や　ゆ　よ　ヤ　ユ　ヨ'
+echo 'らりるれろ　ラリルレロ'
+echo 'わ　を　ん　ワ　ヲ　ン'
+
+echo 'がぎぐげご　ガギグゲゴ'
+echo 'ざじずぜぞ　ザジズゼゾ'
+echo 'だぢづでど　ダヂヅデド'
+echo 'ばびぶべぼ　バビブベボ'
+
+echo 'ぱぴぷぺぽ　パピプペポ'
+echo
+
+#
+echo 'abcdefghijklmnopqrstuvwxyz'
+echo 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+echo
+
+#
+echo 'abcdefg hijklmn opqrstu vwxyz'
+echo 'ABCDEFG HIJKLMN OPQRSTU VWXYZ'
+echo
+
+#
+echo {a..z} | tr ' ' '\n' | shuf | tr -d '\n'; echo
+echo {A..Z} | tr ' ' '\n' | shuf | tr -d '\n'; echo
+echo

@@ -20,6 +20,8 @@ class LogEntry:
     start_line: int
 
 
+pat1 = re.compile(r"(\d{4}/\d{1,2}/\d{1,2})\s*")
+pat2 = re.compile(r"(\d{1,2}):(\d{1,2})(?: (.+)|$)")
 class LogParser:
     def __init__(self) -> None:
         self.entries: list[LogEntry] = []
@@ -27,10 +29,10 @@ class LogParser:
 
     def parse(self, text: str) -> list[LogEntry]:
         for line_number, row in enumerate(text.splitlines(), start=1):
-            if match := re.match(r"(\d{4}/\d{1,2}/\d{1,2})", row):
+            if match := pat1.match(row):
                 self.current_date = datetime.strptime(match.group(1), "%Y/%m/%d")
                 continue
-            if match := re.match(r"(\d{1,2}):(\d{1,2})(?: (.+)|$)", row):
+            if match := pat2.match(row):
                 if not self.current_date:
                     continue
                 hour_str, minute_str, message = match.groups()
@@ -77,16 +79,6 @@ def _parse_boundary(value: str, *, inclusive_end: bool) -> datetime:
             return parsed + timedelta(days=1) - timedelta(microseconds=1)
         return parsed
     raise ValueError(f"invalid timestamp format: {value}")
-
-
-def discover_default_files(root: Path) -> list[Path]:
-    if not root.exists():
-        raise RuntimeError(f"ディレクトリが存在しません: {root}")
-    if not root.is_dir():
-        raise RuntimeError(f"ディレクトリではありません: {root}")
-
-    paths = sorted(p for p in root.rglob("*日記*") if p.is_file())
-    return paths
 
 
 def build_parser() -> ArgumentParser:
@@ -144,18 +136,6 @@ def entry_to_record(
     }
 
 
-def resolve_files(args: Namespace, root: Path) -> list[Path]:
-    if args.files:
-        return [Path(value) for value in args.files]
-    try:
-        discovered = discover_default_files(root)
-    except RuntimeError as exc:
-        raise SystemExit(str(exc)) from exc
-    if not discovered:
-        raise SystemExit("日記ファイルを見つけられませんでした。")
-    return discovered
-
-
 def resolve_bounds(
     args: Namespace, parser: ArgumentParser
 ) -> tuple[datetime | None, datetime | None]:
@@ -198,13 +178,17 @@ def files_root() -> Path:
 
 
 def run(argv: Sequence[str] | None = None) -> int:
-    root = files_root()
-
     parser = build_parser()
     args = parser.parse_args(argv)
     since, until = resolve_bounds(args, parser)
     pattern = re.compile(args.filter) if args.filter else None
-    files = resolve_files(args, root)
+
+    if args.files:
+        root = Path(".")
+        files = [Path(value) for value in args.files]
+    else:
+        root = files_root()
+        files = sorted(p for p in root.rglob("*日記*") if p.is_file())
 
     for record in iter_records(
         files,

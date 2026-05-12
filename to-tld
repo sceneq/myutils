@@ -4,6 +4,7 @@
 # dependencies = [
 #   "requests==2.32.4",
 #   "requests_oauthlib==2.0.0",
+#   "publicsuffix2==2.20191221"
 # ]
 # ///
 # coding: utf-8
@@ -24,4 +25,26 @@ elif level == 3:
     f = get_sld
 
 
-print("\n".join(f(s) or s for s in open(0).read().splitlines()))
+def trim_start(s: str, needle: str) -> str:
+    if s.startswith(needle):
+        return s[len(needle) :]
+    else:
+        return s
+
+
+def trim_end(s: str, needle: str) -> str:
+    if s.endswith(needle):
+        return s[: -len(needle)]
+    else:
+        return s
+
+def proccess(s:str):
+    s = trim_start(s, "https://")
+    s = trim_start(s, "http://")
+    p = s.find("/")
+    if p>=0:
+        s = s[:p]
+    return s
+
+
+print("\n".join(f(proccess(s)) or s for s in open(0).read().splitlines()))

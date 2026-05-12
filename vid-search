@@ -1,0 +1,265 @@
+#!/usr/bin/env -S win-shebang uv.exe run --script
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import sqlite3
+import subprocess
+import sys
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+
+VIDEO_EXTS = {
+    ".mp4",
+    ".mkv",
+    ".avi",
+    ".mov",
+    ".wmv",
+    ".flv",
+    ".webm",
+    ".m4v",
+    ".ts",
+    ".mpg",
+    ".mpeg",
+    ".vob",
+    ".ogv",
+    ".3gp",
+}
+
+FFPROBE_BIN = "ffprobe.exe"
+
+DB_SCHEMA = """
+CREATE TABLE IF NOT EXISTS files (
+    path TEXT PRIMARY KEY,
+    size INTEGER,
+    duration REAL,
+    mtime REAL
+)
+"""
+
+
+def parse_duration_str(s: str) -> float:
+    """Parse HH:MM:SS, MM:SS, or raw seconds."""
+    # Try HH:MM:SS or MM:SS
+    m = re.fullmatch(r"(?:(\d+):)?(\d+):(\d+(?:\.\d+)?)", s)
+    if m:
+        h = int(m.group(1) or 0)
+        mins = int(m.group(2))
+        secs = float(m.group(3))
+        return h * 3600 + mins * 60 + secs
+    return float(s)
+
+
+def parse_size_str(s: str) -> int:
+    """Parse size like 1.5G, 700M, 4096K."""
+    m = re.fullmatch(r"(\d+(?:\.\d+)?)\s*([KMGT]?)B?", s, re.IGNORECASE)
+    num = float(m.group(1))
+    unit = m.group(2).upper()
+    multipliers = {"": 1, "K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4}
+    return int(num * multipliers[unit])
+
+
+def is_duration_query(s: str) -> bool:
+    """Distinguish duration from size: contains ':' or is plain number (seconds)."""
+    return bool(re.search(r":", s)) or re.fullmatch(r"\d+(\.\d+)?", s)
+
+
+def is_size_query(s: str) -> bool:
+    return bool(re.search(r"^\d+[KMGTkmgt]", s))
+
+
+def get_duration(path: str) -> float | None:
+    args = [
+        # ffprobe.exe -loglevel quiet -show_format -print_format json MVI4021.mp4
+        FFPROBE_BIN,
+        "-loglevel",
+        "quiet",
+        "-show_format",
+        "-print_format",
+        "json",
+        path,
+    ]
+    try:
+        r = subprocess.run(
+            args,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        info = json.loads(r.stdout)
+        return float(info["format"]["duration"])
+    except Exception as e:
+        print(path, e)
+
+
+def scan_directory(directory: Path, db: sqlite3.Connection, workers: int):
+    # Collect video files
+    video_files: list[Path] = []
+    for root, _dirs, filenames in os.walk(directory):
+        for fname in filenames:
+            if Path(fname).suffix.lower() in VIDEO_EXTS:
+                video_files.append(Path(root) / fname)
+
+    # Filter: only files needing update (new or mtime changed)
+    to_probe: list[Path] = []
+    cached: dict[str, float] = {}  # path -> cached mtime
+    for row in db.execute("SELECT path, mtime FROM files"):
+        cached[row[0]] = row[1]
+
+    for f in video_files:
+        stat = f.stat()
+        prev_mtime = cached.get(str(f))
+        if prev_mtime is not None and prev_mtime == stat.st_mtime:
+            continue
+        to_probe.append(f)
+
+    if not to_probe:
+        print(f"Cache up to date ({len(video_files)} files)", file=sys.stderr)
+        return
+
+    print(
+        f"Probing {len(to_probe)} / {len(video_files)} files with {workers} workers...",
+        file=sys.stderr,
+    )
+
+    def probe_one(p: Path) -> tuple[str, int, float | None, float]:
+        stat = p.stat()
+        dur = get_duration(str(p))
+        return str(p), stat.st_size, dur, stat.st_mtime
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        results = pool.map(probe_one, to_probe)
+
+    with db:
+        for path, size, duration, mtime in results:
+            db.execute(
+                "INSERT OR REPLACE INTO files (path, size, duration, mtime) VALUES (?, ?, ?, ?)",
+                (path, size, duration, mtime),
+            )
+
+    # Remove stale entries (files no longer on disk)
+    existing = {str(f) for f in video_files}
+    all_cached = [
+        r[0]
+        for r in db.execute(
+            "SELECT path FROM files WHERE path LIKE ?", (str(directory) + "%",)
+        )
+    ]
+    stale = [p for p in all_cached if p not in existing]
+    if stale:
+        db.executemany("DELETE FROM files WHERE path = ?", [(p,) for p in stale])
+        db.commit()
+
+    print(f"Cache updated.", file=sys.stderr)
+
+
+def fmt_duration(secs: float) -> str:
+    h = int(secs) // 3600
+    m = (int(secs) % 3600) // 60
+    s = int(secs) % 60
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+
+
+def fmt_size(nbytes: int) -> str:
+    if nbytes >= 1024**3:
+        return f"{nbytes / 1024**3:.1f}G"
+    if nbytes >= 1024**2:
+        return f"{nbytes / 1024**2:.0f}M"
+    if nbytes >= 1024:
+        return f"{nbytes / 1024:.0f}K"
+    return f"{nbytes}B"
+
+
+def search(
+    db: sqlite3.Connection,
+    query: str,
+    n: int | None,
+):
+    db.create_function("regexp", 2, lambda pat, val: bool(re.search(pat, val or "")))
+
+    mode = "title"
+    if is_size_query(query):
+        mode = "size"
+
+    parse_duration_target = None
+    if mode == "title":
+        try:
+            parse_duration_target = parse_duration_str(query)
+            mode = "duration"
+        except:
+            pass
+
+    if mode == "size":
+        n = n or 10
+        target = parse_size_str(query)
+        print(f"by size {target}")
+        rows = db.execute(
+            """
+            select path, size, duration from files
+            where size is not null
+            order by abs(size - ?) limit ?
+            """,
+            (target, n),
+        ).fetchall()
+        for path, size, duration in rows:
+            exact = "*" if size == target else " "
+            dur_str = fmt_duration(duration) if duration else "?"
+            print(f"{exact} {fmt_size(size):>7s}  {dur_str:>9s}  {path}")
+    elif mode == "duration":
+        n = n or 10
+        assert parse_duration_target is not None
+        print(f"by size {parse_duration_target}")
+        rows = db.execute(
+            """
+            select path, size, duration from files
+            where duration is not null
+            order by abs(duration - ?) limit ?
+            """,
+            (parse_duration_target, n),
+        ).fetchall()
+        for path, size, duration in rows:
+            exact = "*" if duration == parse_duration_target else " "
+            print(f"{exact} {fmt_duration(duration):>9s}  {fmt_size(size):>7s}  {path}")
+    elif mode == "title":
+        n = n or 20
+        print(f"by title {query}")
+        rows = db.execute(
+            "select path, size, duration from files where path regexp ? limit ?",
+            (query, n),
+        ).fetchall()
+        for path, size, duration in rows:
+            size_str = fmt_size(size) if size else "?"
+            dur_str = fmt_duration(duration) if duration else "?"
+            print(f"  {size_str:>7s}  {dur_str:>9s}  {path}")
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Search video files by duration or size"
+    )
+    parser.add_argument(
+        "query",
+        help="Directory to scan, or duration (HH:MM:SS / MM:SS / seconds) / size (e.g. 700M, 1.5G) to search",
+    )
+    parser.add_argument("-n", type=int, help="Max results")
+    parser.add_argument("--db", default="vid-search.cache.db", help="Cache DB path")
+    parser.add_argument(
+        "--workers", type=int, default=8, help="ffprobe parallelism (default: 8)"
+    )
+    args = parser.parse_args()
+
+    db = sqlite3.connect(args.db)
+    db.execute(DB_SCHEMA)
+
+    query_path = Path(args.query)
+    if query_path.is_dir():
+        scan_directory(query_path.resolve(), db, args.workers)
+    else:
+        search(db, args.query, args.n)
+
+    db.close()
+
+
+main()

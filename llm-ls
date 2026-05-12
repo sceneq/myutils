@@ -1,0 +1,79 @@
+#!/usr/bin/env python3
+# coding: utf-8
+
+# 配下のファイルをまとめてLLMに送りたいとき。
+
+from __future__ import annotations
+from pathlib import Path
+
+MAX_LINES = 500
+MAX_CHARS = 300
+
+
+def read_limited_lines(lines: list[str], max_chars: int | None) -> list[str]:
+    """ファイルを読み込み、行数と文字数に制限をかけて返す。"""
+    limited = lines[:MAX_LINES]
+    result = []
+    for l in limited:
+        if max_chars is not None and len(l) > max_chars:
+            result.append(l[:max_chars] + " …(truncated)")
+        else:
+            result.append(l)
+    if len(lines) > MAX_LINES:
+        result.append(f"...(lines truncated beyond {MAX_LINES})")
+    return result
+
+
+def print_file_preview(
+    name: str,
+    lines: list[str],
+    max_chars: int | None,
+) -> None:
+    """ファイル内容の先頭部分を整形して出力する。"""
+    print("=" * 5, "Begin", name, "=" * 5)
+    for i, line in enumerate(read_limited_lines(lines, max_chars)):
+        print(f"{i + 1}: {line}")
+    print("=" * 5, "End", name, "=" * 5)
+    print()
+
+
+def main() -> None:
+    """カレントディレクトリ内のファイルを処理する。"""
+
+    import sys
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "-c", "--max-chars",
+        type=int,
+        default=MAX_CHARS,
+        metavar="N",
+        help="行ごとに出力する最大文字数 (省略時: %(default)s、0 で無制限)",
+    )
+    parser.add_argument("files", nargs="*")
+    args = parser.parse_args()
+
+    max_chars: int | None = None if args.max_chars == 0 else args.max_chars
+
+    if not sys.stdin.isatty():
+        content = sys.stdin.read().splitlines()
+        print_file_preview("STDIN", content, max_chars)
+        return
+
+    if args.files:
+        files = (Path(f) for f in args.files)
+    else:
+        files = Path(".").glob("*")
+
+    for f in files:
+        if f.is_file():
+            print_file_preview(
+                f.name,
+                f.read_text().splitlines(),
+                max_chars,
+            )
+
+
+if __name__ == "__main__":
+    main()

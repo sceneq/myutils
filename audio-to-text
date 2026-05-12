@@ -1,0 +1,95 @@
+#!/usr/bin/env python3
+# coding: utf-8
+
+from __future__ import annotations
+
+import httpx
+import json
+import base64
+import os
+import argparse
+from pathlib import Path
+
+API_KEY_REF = os.environ.get(
+    "OPENROUTER_API_KEY",
+    "XXX",
+)
+
+parser = argparse.ArgumentParser()
+parser.add_argument("audio_path")
+parser.add_argument("--model", default="openai/gpt-audio-mini")
+parser.add_argument("--prompt", default="Please transcribe this audio file.")
+parser.add_argument("--audio-format", default=None)
+args = parser.parse_args()
+
+model = args.model
+audio_path = args.audio_path
+audio_format = args.audio_format or Path(audio_path).suffix[1:]
+prompt = args.prompt
+
+
+def encode_audio_to_base64(audio_path):
+    with open(audio_path, "rb") as audio_file:
+        return base64.b64encode(audio_file.read()).decode("utf-8")
+
+
+base64_audio = encode_audio_to_base64(audio_path)
+
+url = "https://openrouter.ai/api/v1/chat/completions"
+
+messages = [
+    {
+        "role": "user",
+        "content": [
+            {
+                "type": "text",
+                "text": prompt,
+            },
+            {
+                "type": "input_audio",
+                "input_audio": {
+                    "data": base64_audio,
+                    "format": audio_format,
+                },
+            },
+        ],
+    }
+]
+
+payload = {
+    "model": model,
+    "messages": messages,
+    "stream": True,
+}
+headers = {
+    "Authorization": f"Bearer {API_KEY_REF}",
+    "Content-Type": "application/json",
+}
+buffer = ""
+with httpx.stream(
+    "POST",
+    url,
+    headers=headers,
+    json=payload,
+    timeout=httpx.Timeout(60 * 60 * 2),
+) as response:
+    for chunk in response.iter_text():
+        buffer += chunk
+        while True:
+            line_end = buffer.find("\n")
+            if line_end == -1:
+                break
+            line = buffer[:line_end].strip()
+            buffer = buffer[line_end + 1 :]
+            if line.startswith("data: "):
+                data = line[6:]
+                if data == "[DONE]":
+                    break
+                try:
+                    data_obj = json.loads(data)
+                    content = data_obj["choices"][0]["delta"].get("content")
+                    if content:
+                        print(content, end="", flush=True)
+                except json.JSONDecodeError:
+                    pass
+    print()

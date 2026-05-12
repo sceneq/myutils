@@ -1,0 +1,72 @@
+#!/usr/bin/env python3
+# coding: utf-8
+
+from __future__ import annotations
+from pathlib import Path
+import sys
+import difflib
+from pathlib import Path
+
+
+def parse_rg_input(text: str) -> dict[str, dict[int, str]]:
+    # file path -> {line_number -> new_line_content}
+    result: dict[str, dict[int, str]] = {}
+    current_file: str | None = None
+
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        # Line starting with ./ or / and no leading digits+colon -> file header
+        if line and not line[0].isdigit():
+            current_file = line.strip()
+            result[current_file] = {}
+        else:
+            # lineno: content
+            colon_idx = line.index(":")
+            lineno = int(line[:colon_idx])
+            content = line[colon_idx + 1 :]
+            result[current_file][lineno] = content
+
+    return result
+
+
+def make_patch(file_path: str, replacements: dict[int, str]) -> str:
+    path = Path(file_path)
+    original_lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+
+    new_lines = original_lines.copy()
+    for lineno, new_content in replacements.items():
+        # lineno is 1-based; preserve original line ending
+        idx = lineno - 1
+        original = original_lines[idx]
+        ending = "\r\n" if original.endswith("\r\n") else "\n"
+        new_lines[idx] = new_content + ending
+
+    diff = difflib.unified_diff(
+        original_lines,
+        new_lines,
+        fromfile=f"a/{file_path}",
+        tofile=f"b/{file_path}",
+    )
+    return "".join(diff)
+
+
+def main() -> None:
+
+    if sys.stdin.isatty():
+        print("Usage: `rg-to-patch < YOUR_RG_TEXT.txt | patch -p1`")
+        exit(1)
+
+    text = sys.stdin.read()
+    replacements = parse_rg_input(text)
+
+    patches: list[str] = []
+    for file_path, lines in replacements.items():
+        patch = make_patch(file_path, lines)
+        if patch:
+            patches.append(patch)
+
+    print("".join(patches), end="")
+
+
+main()
