@@ -1,0 +1,19 @@
+#!/usr/bin/env python
+from __future__ import annotations
+
+# `rg -w '\d{4}' *.md --color always --no-filename | red-to-bold > tmp.md`
+
+import re
+import sys
+
+
+ANSI_RED_PATTERN = re.compile(
+    r"(?:\x1b\[[0-9;]*m)*"   # leading escape sequences (reset, bold, etc.)
+    r"\x1b\[31m"              # red color start
+    r"(.*?)"                  # content
+    r"\x1b\[0m",              # reset
+    re.DOTALL,
+)
+
+for line in sys.stdin:
+    print(ANSI_RED_PATTERN.sub(r"**\1**", line), end="")

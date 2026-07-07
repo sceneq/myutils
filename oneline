@@ -1,0 +1,10 @@
+#!/usr/bin/env python
+# Googleの文字起こしソフトがダメダメ。約物や改行を削除してLLMに補完させるといい
+print((open(0).read()
+.replace("。", "")
+.replace("、", "")
+.replace("\n", "")
+.replace("？", "")
+.replace("！", "")
+.replace(" ", "")
+))

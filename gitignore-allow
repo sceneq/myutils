@@ -1,0 +1,24 @@
+#!/usr/bin/env python3
+
+from __future__ import annotations
+
+from pathlib import Path
+
+
+def gen_allowlist(path: str) -> str:
+    parts = Path(path).parts
+    lines: list[str] = []
+    accum = ""
+    for i, part in enumerate(parts):
+        accum += "/" + part
+        is_last = i == len(parts) - 1
+        if is_last:
+            lines.append(f"!{accum}")
+        else:
+            lines.append(f"!{accum}/")
+            lines.append(f"{accum}/*")
+    return "\n".join(lines)
+
+
+for path in open(0).read().splitlines():
+    print(gen_allowlist(path))

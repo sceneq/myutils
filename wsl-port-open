@@ -12,7 +12,7 @@ HOST_IPV4=$(powershell.exe -Command "Get-NetIPAddress | Where-Object { \
   \$_.InterfaceAlias -notmatch 'Loopback|WSL' -and \
   \$_.AddressState -eq 'Preferred' -and \
   \$_.IPAddress -notmatch '^169\.254\.' \
-} | Select-Object -ExpandProperty IPAddress" | tr -d '\r')
+} | Select-Object -ExpandProperty IPAddress" | tr -d '\r' | fzf --select-1)
 
 WSL2_IPV4=$(ip address show eth0 | awk '/inet / {print $2}' | awk -F / '{print $1}')
 #WSL2_IPV4=$(ip route | awk '/default/ {print $3}')

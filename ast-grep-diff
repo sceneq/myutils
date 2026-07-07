@@ -8,12 +8,19 @@ import subprocess
 from dataclasses import dataclass, field
 from typing import TypedDict
 
+
 def is_wsl() -> bool:
     import os
+
     return os.getcwd().startswith("/mnt/")
 
 
 def git_diff() -> str:
+    import sys
+
+    if not sys.stdin.isatty():
+        return sys.stdin.read()
+
     git = "git.exe" if is_wsl() else "git"
     return subprocess.check_output(
         [git, "diff", "--unified=0", "HEAD"],
@@ -29,6 +36,7 @@ def ast_grep_scan() -> AstGrepResult:
         text=True,
     )
     return json.loads(p.stdout)
+
 
 #
 # ast-grep

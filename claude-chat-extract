@@ -1,0 +1,21 @@
+#!/usr/bin/env python
+
+from __future__ import annotations
+import json, sys
+
+# https://claude.ai/api/organizations/<chat>/chat_conversations/* のJSON
+
+data = json.load(sys.stdin)
+msgs = {m["uuid"]: m for m in data["chat_messages"]}
+
+uuid = sys.argv[1] if len(sys.argv) > 1 else max(msgs.values(), key=lambda m: m["index"])["uuid"]
+
+def ancestors(uuid: str) -> list:
+    if uuid is None or uuid not in msgs:
+        return []
+    m = msgs[uuid]
+    return ancestors(m["parent_message_uuid"]) + [m]
+
+for m in ancestors(uuid):
+    for c in m["content"]:
+        print(f"{m['sender']}: {c['text']}")

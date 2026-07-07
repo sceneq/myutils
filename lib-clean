@@ -18,3 +18,8 @@ for gomod in ${gomods[@]}; do
 		go clean
 	)
 done
+
+venvs=$(fd -HI '^\.venv$' -t d -X du -sh | sort -h | fzf -m -0 | awk '{print $2}' || true)
+for venv in ${venvs[@]}; do
+	rm -rf "$venv"
+done

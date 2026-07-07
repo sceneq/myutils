@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -o errexit -o errtrace -o noclobber -o pipefail -o nounset
+
+# $1: スキル名
+# $2: ワークスペースディレクトリ（指定された場合のみ $W を上書き）
+
+W="${2:-$W}"
+path="$W/.claude/skills/$1/SKILL.md"
+
+mkdir -p "$(dirname "$path")"
+
+cat > "$path" <<EOF
+---
+name: $1
+description: 
+---
+EOF
+
+"$EDITOR" "$path"

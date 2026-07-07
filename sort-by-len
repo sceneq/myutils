@@ -3,7 +3,6 @@
 
 import sys
 
-
 inp = open(0, "rb").read().splitlines()
 inp.sort(key=len)
 sys.stdout.buffer.write(b"\n".join(inp))
